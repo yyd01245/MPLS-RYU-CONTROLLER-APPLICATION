@@ -360,7 +360,7 @@ class RestRouterAPI(app_manager.RyuApp):
 def rest_command(func):
     def _rest_command(*args, **kwargs):
         try:
-            msg = func(*args, **kwargs)
+            msg = func(*args, **kwargs) 
             return Response(content_type='application/json',
                             body=json.dumps(msg))
 
@@ -450,7 +450,7 @@ class RouterController(ControllerBase):
     @rest_command
     def set_vlan_data(self, req, switch_id, vlan_id, **_kwargs):
         return self._access_router(switch_id, vlan_id,
-                                   'set_data', req)
+                                   'set_data', req) 
 
     # DELETE /router/{switch_id}
     @rest_command
@@ -472,7 +472,7 @@ class RouterController(ControllerBase):
         except ValueError:
             raise SyntaxError('invalid syntax %s', req.body)
         for router in routers.values():
-            function = getattr(router, func)
+            function = getattr(router, func) 
             data = function(vlan_id, param, self.waiters)
             rest_message.append(data)
 
@@ -595,7 +595,7 @@ class Router(dict):
         msgs = []
         for vlan_router in vlan_routers:
             try:
-                msg = vlan_router.set_data(param)
+                msg = vlan_router.set_data(param) 
                 msgs.append(msg)
                 if msg[REST_RESULT] == REST_NG:
                     # Data setting is failure.
@@ -1768,7 +1768,7 @@ class OfCtl(object):
 
     def set_flow(self, cookie, priority, dl_type=0, dl_dst=0, dl_vlan=0,
                  nw_src=0, src_mask=32, nw_dst=0, dst_mask=32,
-                 nw_proto=0, idle_timeout=0, actions=None):
+                 nw_proto=0, idle_timeout=0, tunnel_id=0, actions=None):
         # Abstract method
         raise NotImplementedError()
 
@@ -1913,13 +1913,19 @@ class OfCtl(object):
         self.set_flow(cookie, priority, actions=actions)
 
     def set_packetin_flow(self, cookie, priority, dl_type=0, dl_dst=0,
-                          dl_vlan=0, dst_ip=0, dst_mask=32, nw_proto=0):
+                          dl_vlan=0, dst_ip=0, dst_mask=32, nw_proto=0, tunnel_id=0):
         miss_send_len = UINT16_MAX
         actions = [self.dp.ofproto_parser.OFPActionOutput(
             self.dp.ofproto.OFPP_CONTROLLER, miss_send_len)]
+        print "------------ yyd tunnel_id=",tunnel_id
+        # if tunnel_id <= 0 :
+        #     self.set_flow(cookie, priority, dl_type=dl_type, dl_dst=dl_dst,
+        #               dl_vlan=dl_vlan, nw_dst=dst_ip, dst_mask=dst_mask,
+        #               nw_proto=nw_proto, actions=actions)
+        # else :
         self.set_flow(cookie, priority, dl_type=dl_type, dl_dst=dl_dst,
-                      dl_vlan=dl_vlan, nw_dst=dst_ip, dst_mask=dst_mask,
-                      nw_proto=nw_proto, actions=actions)
+                    dl_vlan=dl_vlan, nw_dst=dst_ip, dst_mask=dst_mask,
+                    nw_proto=nw_proto,  actions=actions, tunnel_id=tunnel_id)
 
     def send_stats_request(self, stats, waiters):
         self.dp.set_xid(stats)
@@ -1958,11 +1964,11 @@ class OfCtl_v1_0(OfCtl):
 
     def set_flow(self, cookie, priority, dl_type=0, dl_dst=0, dl_vlan=0,
                  nw_src=0, src_mask=32, nw_dst=0, dst_mask=32,
-                 nw_proto=0, idle_timeout=0, actions=None):
+                 nw_proto=0, idle_timeout=0, tunnel_id=0, actions=None):
         ofp = self.dp.ofproto
         ofp_parser = self.dp.ofproto_parser
         cmd = ofp.OFPFC_ADD
-
+        
         # Match
         wildcards = ofp.OFPFW_ALL
         if dl_type:
@@ -1986,7 +1992,7 @@ class OfCtl_v1_0(OfCtl):
 
         match = ofp_parser.OFPMatch(wildcards, 0, 0, dl_dst, dl_vlan, 0,
                                     dl_type, 0, nw_proto,
-                                    nw_src, nw_dst, 0, 0)
+                                    nw_src, nw_dst, 0, 0,tunnel_id=tunnel_id)
         actions = actions or []
 
         m = ofp_parser.OFPFlowMod(self.dp, match, cookie, cmd,
@@ -2063,11 +2069,11 @@ class OfCtl_after_v1_2(OfCtl):
 
     def set_flow(self, cookie, priority, dl_type=0, dl_dst=0, dl_vlan=0,
                  nw_src=0, src_mask=32, nw_dst=0, dst_mask=32,
-                 nw_proto=0, idle_timeout=0, actions=None):
+                 nw_proto=0, idle_timeout=0, tunnel_id=0, actions=None):
         ofp = self.dp.ofproto
         ofp_parser = self.dp.ofproto_parser
         cmd = ofp.OFPFC_ADD
-
+        print "-------- yyd OfCtl_after_v1_2 set_flow"
         # Match
         match = ofp_parser.OFPMatch()
         if dl_type:
@@ -2087,7 +2093,9 @@ class OfCtl_after_v1_2(OfCtl):
                 match.set_ip_proto(nw_proto)
             elif dl_type == ether.ETH_TYPE_ARP:
                 match.set_arp_opcode(nw_proto)
-
+        if tunnel_id:
+            match.set_tunnel_id(tunnel_id);
+            # match.set_tun_id(tunnel_id);
         # Instructions
         actions = actions or []
         inst = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS,
@@ -2217,7 +2225,7 @@ class OfCtl_v1_3(OfCtl_after_v1_2):
 					parser.OFPActionSetField(mpls_label=label),parser.OFPActionOutput(out_port)]
 			match = parser.OFPMatch(in_port=in_port,
 				eth_type=dl_type, mpls_label=oldlabel)
-			self.set_my_flow(cookie, priority, match,
+			self.set_flow(cookie, priority, match,
 				idle_timeout=idle_timeout, actions=actions)
 		elif action == MPLS_POP_LABEL:
 			dl_type = ether.ETH_TYPE_MPLS
@@ -2227,8 +2235,8 @@ class OfCtl_v1_3(OfCtl_after_v1_2):
 				parser.OFPActionOutput(out_port)]
 			
 			match = parser.OFPMatch(eth_type=dl_type, mpls_label=oldlabel)
-			self.set_my_flow(cookie, priority, match,
-					idle_timeout=idle_timeout, actions=actions)
+			self.set_flow(cookie, priority, match,
+                idle_timeout=idle_timeout, actions=actions)
 
 	# MPLSmod: get mpls label
 	def get_packetin_mplslabel(self, msg):
